@@ -1,0 +1,88 @@
+name: "Template - PR Develop → Release"
+
+on:
+  workflow_call:
+    secrets:
+      GH_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-release-pr:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get release version from .version
+        id: version
+        run: |
+          if [ -f ".version" ]; then
+            BASE_VERSION=$(sed 's/-.*//' .version)
+          else
+            BASE_VERSION="1.0.0"
+          fi
+
+          RELEASE_VERSION="$BASE_VERSION-RELEASE"
+          echo "$RELEASE_VERSION" > .version
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release Branch and commit .version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BASE_VERSION="${{ steps.version.outputs.base_version }}"
+          RELEASE_BRANCH="release/$BASE_VERSION"
+          
+          if git ls-remote --heads origin "$RELEASE_BRANCH" | grep "$RELEASE_BRANCH"; then
+            echo "Branch $RELEASE_BRANCH já existe remotamente."
+            git checkout "$RELEASE_BRANCH"
+            git pull origin "$RELEASE_BRANCH"
+          else
+            git checkout -b "$RELEASE_BRANCH"
+          fi
+          
+          git add .version
+          git commit -m "chore: bump version to $VERSION [skip ci]" || echo "No changes"
+          git push origin "$RELEASE_BRANCH"
+
+      - name: Create Pull Request
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          BASE_VERSION="${{ steps.version.outputs.base_version }}"
+          RELEASE_BRANCH="release/$BASE_VERSION"
+          
+          EXISTING_PR=$(gh pr list --head "$RELEASE_BRANCH" --base main --json number --jq '.[0].number')
+          
+          if [ -n "$EXISTING_PR" ]; then
+            echo "✅ PR #$EXISTING_PR já existe"
+            exit 0
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$RELEASE_BRANCH" \
+            --title "🚀 Release v$BASE_VERSION" \
+            --body "## 🚀 Release v$BASE_VERSION
+          
+          **Versão:** \`$BASE_VERSION\`  
+          **Branch:** \`$RELEASE_BRANCH\`  
+          **Target:** \`main\`
+          
+          ---
+          _PR criado automaticamente pelo workflow_"
+          
+          echo "✅ PR criado com sucesso!"

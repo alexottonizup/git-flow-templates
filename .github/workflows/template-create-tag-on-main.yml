@@ -1,0 +1,56 @@
+name: "Template - Create Tag on Main"
+
+on:
+  workflow_call:
+    secrets:
+      GH_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get version and sufixo from .version file
+        id: version
+        run: |
+          VERSION=$(sed 's/-.*//' .version)
+          SUFIXO=$(grep -oP '(?<=-).*' .version || echo "")
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sufixo=$SUFIXO" >> "$GITHUB_OUTPUT"
+
+      - name: Create Tag and Push
+        if: steps.version.outputs.sufixo == 'RELEASE'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "⚠️ Tag $TAG já existe localmente."
+            exit 0
+          fi
+
+          if git ls-remote --tags origin | grep "$TAG"; then
+            echo "⚠️ Tag $TAG já existe remotamente."
+            exit 0
+          fi
+
+          git tag "$TAG"
+          git push origin "$TAG"
+          
+          echo "✅ Tag $TAG criada com sucesso!"
