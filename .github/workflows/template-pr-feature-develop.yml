@@ -2,6 +2,13 @@ name: "Template - PR Feature → Develop"
 
 on:
   workflow_call:
+    outputs:
+      version:
+        description: 'Versão calculada'
+        value: ${{ jobs.create-pr.outputs.version }}
+      bump_type:
+        description: 'Tipo de bump'
+        value: ${{ jobs.create-pr.outputs.bump_type }}
     secrets:
       GH_TOKEN:
         required: true

@@ -2,6 +2,13 @@ name: "Template - PR Develop → Release"
 
 on:
   workflow_call:
+    outputs:
+      version:
+        description: 'Versão calculada'
+        value: ${{ jobs.create-release-pr.outputs.version }}
+      bump_type:
+        description: 'Versão Base'
+        value: ${{ jobs.create-release-pr.outputs.base_version }}
     secrets:
       GH_TOKEN:
         required: true
