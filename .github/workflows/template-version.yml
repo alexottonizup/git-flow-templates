@@ -22,6 +22,9 @@ jobs:
         with:
           token: ${{ secrets.token }}
 
+      - name: Instala chardet
+        run: pip install chardet
+
       - name: Versionamento automático
         env:
           BASE_REF: ${{ inputs.base_ref }}
