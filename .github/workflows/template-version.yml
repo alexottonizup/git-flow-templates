@@ -73,8 +73,11 @@ jobs:
           # -------------------------------------------------------------------
           def read_version():
               if lang == "raw":
+                  import chardet
                   p = Path(ver_file)
-                  v = p.read_text(encoding="utf-8").strip()
+                  raw = p.read_bytes()
+                  detected = chardet.detect(raw)
+                  v = raw.decode(detected['encoding']).strip()
                   if not v:
                       print("Arquivo .version está vazio.")
                       sys.exit(1)
