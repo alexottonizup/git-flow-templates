@@ -76,6 +76,7 @@ jobs:
           # -------------------------------------------------------------------
           def read_version():
               if lang == "raw":
+                  print("Lendo .version com chardet")
                   import chardet
                   p = Path(ver_file)
                   raw = p.read_bytes()
