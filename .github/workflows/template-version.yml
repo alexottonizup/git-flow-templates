@@ -1,282 +1,283 @@
-- name: Versionamento automático
-  env:
-    BASE_REF: ${{ inputs.base_ref }}
-    HEAD_REF: ${{ inputs.head_ref }}
-    GITHUB_TOKEN: ${{ secrets.token }}
-  run: |
-    python - << 'PY'
-    import os
-    import re
-    import sys
-    import json
-    import subprocess
-    from pathlib import Path
-    import xml.etree.ElementTree as ET
+name: Versionamento automático
 
-    BASE_REF = os.environ["BASE_REF"]
-    HEAD_REF = os.environ["HEAD_REF"]
+on:
+  workflow_call:
+    inputs:
+      base_ref:
+        required: true
+        type: string
+      head_ref:
+        required: true
+        type: string
+    secrets:
+      token:
+        required: true
 
-    print(f"Base_ref: {BASE_REF}")
-    print(f"Head_ref: {HEAD_REF}")
+jobs:
+  versioning:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.token }}
 
-    repo = Path(".")
+      - name: Versionamento automático
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          HEAD_REF: ${{ inputs.head_ref }}
+          GITHUB_TOKEN: ${{ secrets.token }}
+        run: |
+          python - << 'PY'
+          import os
+          import re
+          import sys
+          import json
+          import subprocess
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
 
-    def run(cmd: str):
-        print(f"+ {cmd}")
-        subprocess.check_call(cmd, shell=True)
+          BASE_REF = os.environ["BASE_REF"]
+          HEAD_REF = os.environ["HEAD_REF"]
 
-    # -------------------------------------------------------------------
-    # Detecção do "tipo" de projeto / arquivo de versão
-    # -------------------------------------------------------------------
-    def detect_project():
-        # PRIORIDADE: se existir .version, usar ele como fonte da versão
-        if (repo / ".version").exists():
-            return "raw", ".version"
-        if (repo / "pom.xml").exists():
-            return "java", "pom.xml"
-        if (repo / "package.json").exists():
-            return "node", "package.json"
-        if (repo / "pyproject.toml").exists():
-            return "python", "pyproject.toml"
-        print("Nenhum arquivo de versionamento suportado encontrado (.version, pom.xml, package.json, pyproject.toml).")
-        sys.exit(0)
+          print(f"Base_ref: {BASE_REF}")
+          print(f"Head_ref: {HEAD_REF}")
 
-    lang, ver_file = detect_project()
-    print(f"Projeto detectado: {lang} ({ver_file})")
+          repo = Path(".")
 
-    # -------------------------------------------------------------------
-    # Leitura da versão
-    # -------------------------------------------------------------------
-    def read_version():
-        if lang == "raw":
-            p = Path(ver_file)
-            v = p.read_text(encoding="utf-8").strip()
-            if not v:
-                print("Arquivo .version está vazio.")
-                sys.exit(1)
-            return v
+          def run(cmd: str):
+              print(f"+ {cmd}")
+              subprocess.check_call(cmd, shell=True)
 
-        if lang == "node":
-            p = Path(ver_file)
-            data = json.loads(p.read_text(encoding="utf-8"))
-            v = data.get("version")
-            if not v:
-                print("Campo 'version' não encontrado em package.json.")
-                sys.exit(1)
-            return v.strip()
+          # -------------------------------------------------------------------
+          # Detecção do "tipo" de projeto / arquivo de versão
+          # -------------------------------------------------------------------
+          def detect_project():
+              # PRIORIDADE: se existir .version, usar ele como fonte da versão
+              if (repo / ".version").exists():
+                  return "raw", ".version"
+              if (repo / "pom.xml").exists():
+                  return "java", "pom.xml"
+              if (repo / "package.json").exists():
+                  return "node", "package.json"
+              if (repo / "pyproject.toml").exists():
+                  return "python", "pyproject.toml"
+              print("Nenhum arquivo de versionamento suportado encontrado (.version, pom.xml, package.json, pyproject.toml).")
+              sys.exit(0)
 
-        if lang == "java":
-            tree = ET.parse(ver_file)
-            root = tree.getroot()
-            ns = ""
-            if root.tag.startswith("{"):
-                ns = root.tag.split("}")[0].strip("{")
+          lang, ver_file = detect_project()
+          print(f"Projeto detectado: {lang} ({ver_file})")
 
-            def find_with_ns(tag):
-                return root.find(f"{{{ns}}}{tag}") if ns else root.find(tag)
+          # -------------------------------------------------------------------
+          # Leitura da versão
+          # -------------------------------------------------------------------
+          def read_version():
+              if lang == "raw":
+                  p = Path(ver_file)
+                  v = p.read_text(encoding="utf-8").strip()
+                  if not v:
+                      print("Arquivo .version está vazio.")
+                      sys.exit(1)
+                  return v
+              if lang == "node":
+                  p = Path(ver_file)
+                  data = json.loads(p.read_text(encoding="utf-8"))
+                  v = data.get("version")
+                  if not v:
+                      print("Campo 'version' não encontrado em package.json.")
+                      sys.exit(1)
+                  return v.strip()
+              if lang == "java":
+                  tree = ET.parse(ver_file)
+                  root = tree.getroot()
+                  ns = ""
+                  if root.tag.startswith("{"):
+                      ns = root.tag.split("}")[0].strip("{")
+                  def find_with_ns(tag):
+                      return root.find(f"{{{ns}}}{tag}") if ns else root.find(tag)
+                  v_el = find_with_ns("version")
+                  if v_el is None or not v_el.text:
+                      print("Não foi possível localizar <version> em pom.xml.")
+                      sys.exit(1)
+                  return v_el.text.strip()
+              if lang == "python":
+                  text = Path(ver_file).read_text(encoding="utf-8")
+                  # Assume linha: version = "x.y.z"
+                  m = re.search(r'(?m)^\s*version\s*=\s*["\']([^"\']+)["\']', text)
+                  if not m:
+                      print("Não foi possível encontrar 'version = \"x.y.z\" em pyproject.toml.")
+                      sys.exit(1)
+                  return m.group(1).strip()
+              print("Linguagem não suportada.")
+              sys.exit(1)
 
-            v_el = find_with_ns("version")
-            if v_el is None or not v_el.text:
-                print("Não foi possível localizar <version> em pom.xml.")
-                sys.exit(1)
-            return v_el.text.strip()
+          # -------------------------------------------------------------------
+          # Escrita da versão
+          # -------------------------------------------------------------------
+          def write_version(new_version: str):
+              print(f"Atualizando versão para: {new_version}")
+              if lang == "raw":
+                  p = Path(ver_file)
+                  p.write_text(new_version + "\n", encoding="utf-8")
+                  return
+              if lang == "node":
+                  p = Path(ver_file)
+                  data = json.loads(p.read_text(encoding="utf-8"))
+                  data["version"] = new_version
+                  p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                  return
+              if lang == "java":
+                  tree = ET.parse(ver_file)
+                  root = tree.getroot()
+                  ns = ""
+                  if root.tag.startswith("{"):
+                      ns = root.tag.split("}")[0].strip("{")
+                  def find_with_ns(tag):
+                      return root.find(f"{{{ns}}}{tag}") if ns else root.find(tag)
+                  v_el = find_with_ns("version")
+                  if v_el is None:
+                      print("Não foi possível localizar <version> em pom.xml.")
+                      sys.exit(1)
+                  v_el.text = new_version
+                  tree.write(ver_file, xml_declaration=True, encoding="utf-8")
+                  return
+              if lang == "python":
+                  p = Path(ver_file)
+                  text = p.read_text(encoding="utf-8")
+                  new_text, n = re.subn(
+                      r'(?m)^(\s*version\s*=\s*)["\']([^"\']+)["\']',
+                      r'\1"{}"'.format(new_version),
+                      text,
+                      count=1
+                  )
+                  if n == 0:
+                      print("Falha ao atualizar versão em pyproject.toml.")
+                      sys.exit(1)
+                  p.write_text(new_text, encoding="utf-8")
+                  return
+              print("Linguagem não suportada.")
+              sys.exit(1)
 
-        if lang == "python":
-            text = Path(ver_file).read_text(encoding="utf-8")
-            # Assume linha: version = "x.y.z"
-            m = re.search(r'(?m)^\s*version\s*=\s*["\']([^"\']+)["\']', text)
-            if not m:
-                print("Não foi possível encontrar 'version = \"x.y.z\" em pyproject.toml.")
-                sys.exit(1)
-            return m.group(1).strip()
+          # -------------------------------------------------------------------
+          # Funções auxiliares de versionamento
+          # -------------------------------------------------------------------
+          def bump_snapshot(current: str) -> str:
+              """ Se x.y.z -> (y+1) gera: x.(y+1).0-SNAPSHOT-00
+                  Se x.y.z-SNAPSHOT-NN -> incrementa NN """
+              m_plain = re.match(r'^(\d+)\.(\d+)\.(\d+)$', current)
+              m_snap = re.match(r'^(\d+)\.(\d+)\.(\d+)-SNAPSHOT-(\d+)$', current)
+              if m_snap:
+                  major, minor, patch, idx = map(int, m_snap.groups())
+                  idx += 1
+                  return f"{major}.{minor}.{patch}-SNAPSHOT-{idx:02d}"
+              if m_plain:
+                  major, minor, patch = map(int, m_plain.groups())
+                  minor += 1
+                  patch = 0
+                  return f"{major}.{minor}.{patch}-SNAPSHOT-00"
+              print(f"Formato de versão não suportado para SNAPSHOT: {current}")
+              sys.exit(1)
 
-        print("Linguagem não suportada.")
-        sys.exit(1)
+          def snapshot_to_release(current: str) -> str:
+              """ x.y.z-SNAPSHOT-NN -> x.y.z-RELEASE """
+              m_snap = re.match(r'^(\d+)\.(\d+)\.(\d+)-SNAPSHOT-\d+$', current)
+              if not m_snap:
+                  print(f"Versão atual não é SNAPSHOT: {current}")
+                  sys.exit(1)
+              major, minor, patch = m_snap.groups()
+              return f"{major}.{minor}.{patch}-RELEASE"
 
-    # -------------------------------------------------------------------
-    # Escrita da versão
-    # -------------------------------------------------------------------
-    def write_version(new_version: str):
-        print(f"Atualizando versão para: {new_version}")
+          def release_to_final(current: str) -> str:
+              """ x.y.z-RELEASE -> x.y.z """
+              m_rel = re.match(r'^(\d+)\.(\d+)\.(\d+)-RELEASE$', current)
+              if not m_rel:
+                  print(f"Versão atual não é RELEASE: {current}")
+                  sys.exit(1)
+              return ".".join(m_rel.groups())
 
-        if lang == "raw":
-            p = Path(ver_file)
-            p.write_text(new_version + "\n", encoding="utf-8")
-            return
+          def bump_patch(current: str) -> str:
+              """ x.y.z -> x.y.(z+1) """
+              m = re.match(r'^(\d+)\.(\d+)\.(\d+)$', current)
+              if not m:
+                  print(f"Versão atual não é semântica simples x.y.z: {current}")
+                  sys.exit(1)
+              major, minor, patch = map(int, m.groups())
+              patch += 1
+              return f"{major}.{minor}.{patch}"
 
-        if lang == "node":
-            p = Path(ver_file)
-            data = json.loads(p.read_text(encoding="utf-8"))
-            data["version"] = new_version
-            p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-            return
+          # -------------------------------------------------------------------
+          # Detecção de cenário (fluxo de branches)
+          # -------------------------------------------------------------------
+          scenario = None
+          if BASE_REF == "develop" and HEAD_REF.startswith("feature/"):
+              scenario = "feature_to_develop"
+          elif BASE_REF.startswith("release/") and HEAD_REF == "develop":
+              scenario = "develop_to_release"
+          elif BASE_REF == "main" and HEAD_REF.startswith("release/"):
+              scenario = "release_to_main"
+          elif BASE_REF == "main" and HEAD_REF.startswith("hotfix/"):
+              scenario = "hotfix_to_main"
 
-        if lang == "java":
-            tree = ET.parse(ver_file)
-            root = tree.getroot()
-            ns = ""
-            if root.tag.startswith("{"):
-                ns = root.tag.split("}")[0].strip("{")
+          if not scenario:
+              print("PR não segue fluxo de versionamento controlado, nada a fazer.")
+              sys.exit(0)
 
-            def find_with_ns(tag):
-                return root.find(f"{{{ns}}}{tag}") if ns else root.find(tag)
+          print(f"Cenário detectado: {scenario}")
 
-            v_el = find_with_ns("version")
-            if v_el is None:
-                print("Não foi possível localizar <version> em pom.xml.")
-                sys.exit(1)
-            v_el.text = new_version
-            tree.write(ver_file, xml_declaration=True, encoding="utf-8")
-            return
+          # -------------------------------------------------------------------
+          # Execução principal
+          # -------------------------------------------------------------------
 
-        if lang == "python":
-            p = Path(ver_file)
-            text = p.read_text(encoding="utf-8")
-            new_text, n = re.subn(
-                r'(?m)^(\s*version\s*=\s*)["\']([^"\']+)["\']',
-                r'\1"{}"'.format(new_version),
-                text,
-                count=1
-            )
-            if n == 0:
-                print("Falha ao atualizar versão em pyproject.toml.")
-                sys.exit(1)
-            p.write_text(new_text, encoding="utf-8")
-            return
+          # Garante que estamos na branch base
+          run(f"git checkout {BASE_REF}")
 
-        print("Linguagem não suportada.")
-        sys.exit(1)
+          current_version = read_version()
+          print(f"Versão atual no arquivo: {current_version}")
 
-    # -------------------------------------------------------------------
-    # Funções auxiliares de versionamento
-    # -------------------------------------------------------------------
-    def bump_snapshot(current: str) -> str:
-        """
-        Se x.y.z -> (y+1) gera: x.(y+1).0-SNAPSHOT-00
-        Se x.y.z-SNAPSHOT-NN -> incrementa NN
-        """
-        m_plain = re.match(r'^(\d+)\.(\d+)\.(\d+)$', current)
-        m_snap = re.match(r'^(\d+)\.(\d+)\.(\d+)-SNAPSHOT-(\d+)$', current)
+          if scenario == "feature_to_develop":
+              # feature -> develop
+              new_version = bump_snapshot(current_version)
+              print(f"Nova versão SNAPSHOT: {new_version}")
+              write_version(new_version)
+              run("git commit -am 'chore: bump versão SNAPSHOT' || echo 'Nada para commitar'")
+              run(f"git push origin {BASE_REF}")
 
-        if m_snap:
-            major, minor, patch, idx = map(int, m_snap.groups())
-            idx += 1
-            return f"{major}.{minor}.{patch}-SNAPSHOT-{idx:02d}"
+          elif scenario == "develop_to_release":
+              # develop -> release
+              # Ex.: 1.4.0-SNAPSHOT-02 -> 1.4.0-RELEASE
+              new_version = snapshot_to_release(current_version)
+              print(f"Nova versão RELEASE: {new_version}")
+              write_version(new_version)
+              run("git commit -am 'chore: prepara RELEASE' || echo 'Nada para commitar'")
+              run(f"git push origin {BASE_REF}")
+              print(f"Atenção: recomenda-se que o nome da branch seja release/{new_version}")
 
-        if m_plain:
-            major, minor, patch = map(int, m_plain.groups())
-            minor += 1
-            patch = 0
-            return f"{major}.{minor}.{patch}-SNAPSHOT-00"
+          elif scenario == "release_to_main":
+              # release -> main
+              # Ex.: 1.4.0-RELEASE -> arquivo e tag 1.4.0 final_version
+              final_version = release_to_final(current_version)
+              print(f"Versão final (tag): {final_version}")
+              write_version(final_version)
+              run("git commit -am 'chore: finaliza release' || echo 'Nada para commitar'")
+              run(f"git push origin {BASE_REF}")
+              run(f"git tag -a {final_version} -m 'Release {final_version}'")
+              run("git push origin --tags")
 
-        print(f"Formato de versão não suportado para SNAPSHOT: {current}")
-        sys.exit(1)
+          elif scenario == "hotfix_to_main":
+              # hotfix -> main
+              # Ex.: 1.4.0 -> 1.4.1
+              new_version = bump_patch(current_version)
+              print(f"Nova versão de hotfix: {new_version}")
+              write_version(new_version)
+              run(f"git commit -am 'chore: hotfix {new_version}' || echo 'Nada para commitar'")
+              run(f"git push origin {BASE_REF}")
+              run(f"git tag -a {new_version} -m 'Hotfix {new_version}'")
+              run("git push origin --tags")
 
-    def snapshot_to_release(current: str) -> str:
-        """
-        x.y.z-SNAPSHOT-NN -> x.y.z-RELEASE
-        """
-        m_snap = re.match(r'^(\d+)\.(\d+)\.(\d+)-SNAPSHOT-\d+$', current)
-        if not m_snap:
-            print(f"Versão atual não é SNAPSHOT: {current}")
-            sys.exit(1)
-        major, minor, patch = m_snap.groups()
-        return f"{major}.{minor}.{patch}-RELEASE"
+              # Merge de main -> develop para manter develop atualizado
+              run("git fetch origin develop")
+              run("git checkout develop")
+              run(f"git merge --no-ff origin/main -m 'chore: merge hotfix {new_version} em develop'")
+              run("git push origin develop")
 
-    def release_to_final(current: str) -> str:
-        """
-        x.y.z-RELEASE -> x.y.z
-        """
-        m_rel = re.match(r'^(\d+)\.(\d+)\.(\d+)-RELEASE$', current)
-        if not m_rel:
-            print(f"Versão atual não é RELEASE: {current}")
-            sys.exit(1)
-        return ".".join(m_rel.groups())
-
-    def bump_patch(current: str) -> str:
-        """
-        x.y.z -> x.y.(z+1)
-        """
-        m = re.match(r'^(\d+)\.(\d+)\.(\d+)$', current)
-        if not m:
-            print(f"Versão atual não é semântica simples x.y.z: {current}")
-            sys.exit(1)
-        major, minor, patch = map(int, m.groups())
-        patch += 1
-        return f"{major}.{minor}.{patch}"
-
-    # -------------------------------------------------------------------
-    # Detecção de cenário (fluxo de branches)
-    # -------------------------------------------------------------------
-    scenario = None
-
-    if BASE_REF == "develop" and HEAD_REF.startswith("feature/"):
-        scenario = "feature_to_develop"
-    elif BASE_REF.startswith("release/") and HEAD_REF == "develop":
-        scenario = "develop_to_release"
-    elif BASE_REF == "main" and HEAD_REF.startswith("release/"):
-        scenario = "release_to_main"
-    elif BASE_REF == "main" and HEAD_REF.startswith("hotfix/"):
-        scenario = "hotfix_to_main"
-
-    if not scenario:
-        print("PR não segue fluxo de versionamento controlado, nada a fazer.")
-        sys.exit(0)
-
-    print(f"Cenário detectado: {scenario}")
-
-    # -------------------------------------------------------------------
-    # Execução principal
-    # -------------------------------------------------------------------
-    # Garante que estamos na branch base
-    run(f"git checkout {BASE_REF}")
-
-    current_version = read_version()
-    print(f"Versão atual no arquivo: {current_version}")
-
-    if scenario == "feature_to_develop":
-        # feature -> develop
-        new_version = bump_snapshot(current_version)
-        print(f"Nova versão SNAPSHOT: {new_version}")
-        write_version(new_version)
-        run("git commit -am 'chore: bump versão SNAPSHOT' || echo 'Nada para commitar'")
-        run(f"git push origin {BASE_REF}")
-
-    elif scenario == "develop_to_release":
-        # develop -> release
-        # Ex.: 1.4.0-SNAPSHOT-02 -> 1.4.0-RELEASE
-        new_version = snapshot_to_release(current_version)
-        print(f"Nova versão RELEASE: {new_version}")
-        write_version(new_version)
-        run("git commit -am 'chore: prepara RELEASE' || echo 'Nada para commitar'")
-        run(f"git push origin {BASE_REF}")
-        print(f"Atenção: recomenda-se que o nome da branch seja release/{new_version}")
-
-    elif scenario == "release_to_main":
-        # release -> main
-        # Ex.: 1.4.0-RELEASE -> arquivo e tag 1.4.0
-        final_version = release_to_final(current_version)
-        print(f"Versão final (tag): {final_version}")
-        write_version(final_version)
-        run("git commit -am 'chore: finaliza release' || echo 'Nada para commitar'")
-        run(f"git push origin {BASE_REF}")
-        run(f"git tag -a {final_version} -m 'Release {final_version}'")
-        run("git push origin --tags")
-
-    elif scenario == "hotfix_to_main":
-        # hotfix -> main
-        # Ex.: 1.4.0 -> 1.4.1
-        new_version = bump_patch(current_version)
-        print(f"Nova versão de hotfix: {new_version}")
-        write_version(new_version)
-        run(f"git commit -am 'chore: hotfix {new_version}' || echo 'Nada para commitar'")
-        run(f"git push origin {BASE_REF}")
-        run(f"git tag -a {new_version} -m 'Hotfix {new_version}'")
-        run("git push origin --tags")
-
-        # Merge de main -> develop para manter develop atualizado
-        run("git fetch origin develop")
-        run("git checkout develop")
-        run(f"git merge --no-ff origin/main -m 'chore: merge hotfix {new_version} em develop'")
-        run("git push origin develop")
-    PY
+          PY
